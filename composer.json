@@ -1,5 +1,5 @@
 {
-    "name": "edwingc02/laravel-casbin",
+    "name": "sodeker/laravel-casbin",
     "description": "Paquete Laravel para Casbin con RBAC multi-tenant por dominios",
     "type": "library",
     "autoload": {
