@@ -11,8 +11,8 @@
         ]
     },
     "require": {
-        "php": "^8.1",
-        "casbin/casbin": "^3.0",
+        "php": "^8.2",
+        "casbin/casbin": "^4.1",
         "casbin/database-adapter": "^2.1",
         "illuminate/support": "^10.0"
     },
