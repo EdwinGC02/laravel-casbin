@@ -251,3 +251,12 @@ Como paquete versionado:
 - La tabla `casbin_rule` se crea en la conexión definida por `CASBIN_CONNECTION` (por defecto `landlord`).
 - Para mantener consistencia multi-tenant, usa siempre el mismo formato de dominio `tenant:{id}` en políticas y asignaciones.
 - Si cambias `CASBIN_TENANT_PREFIX`, asegúrate de que tus datos en `casbin_rule` usen ese prefijo.
+
+## Créditos y dependencias de terceros
+
+Este paquete integra Casbin como motor de autorización y se apoya en librerías oficiales del ecosistema Casbin para PHP.
+
+- Casbin (core): [https://github.com/casbin/casbin](https://github.com/casbin/casbin)
+- PHP Casbin Database Adapter: [https://github.com/php-casbin/database-adapter](https://github.com/php-casbin/database-adapter)
+
+Cada dependencia mantiene su propia licencia. Revisa sus repositorios y archivos de licencia para más detalle.
