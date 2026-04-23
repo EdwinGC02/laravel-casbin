@@ -1,0 +1,26 @@
+{
+    "name": "edwingc02/laravel-casbin",
+    "description": "Paquete Laravel para Casbin con RBAC multi-tenant por dominios",
+    "type": "library",
+    "autoload": {
+        "psr-4": {
+            "Sodeker\\LaravelCasbin\\": "src/"
+        },
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "require": {
+        "php": "^8.1",
+        "casbin/casbin": "^3.0",
+        "casbin/database-adapter": "^2.1",
+        "illuminate/support": "^10.0"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+            "Sodeker\\LaravelCasbin\\LaravelCasbinServiceProvider"
+            ]
+        }
+    }
+}
