@@ -42,7 +42,7 @@ Mientras el paquete esté privado en tu usuario personal, en la app consumidora 
 Luego instala:
 
 ```bash
-composer require EdwinGC02/laravel-casbin
+composer require sodeker/laravel-casbin
 ```
 
 ### 2) Cuando lo muevas a la organización Sodeker
