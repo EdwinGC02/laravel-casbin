@@ -14,7 +14,7 @@ Está pensado para centralizar permisos por rol en entornos multi-tenant, donde 
 - Middleware listo para rutas: `casbin` (y alias `permission`).
 - Soporte para desactivar validación con `CASBIN_ENABLED=false`.
 - Conexión de base de datos configurable, por defecto y recomendada: `landlord`.
-- Sin SQL crudo en el paquete (uso del adapter oficial de Casbin para BD).
+- Sin SQL crudo en el paquete: la persistencia usa `LaravelDatabaseAdapter`, un adaptador propio sobre el query builder de Laravel que **reutiliza la conexión del DatabaseManager** (no abre conexiones PDO adicionales).
 
 ## Requisitos
 
@@ -257,6 +257,6 @@ Como paquete versionado:
 Este paquete integra Casbin como motor de autorización y se apoya en librerías oficiales del ecosistema Casbin para PHP.
 
 - Casbin (core): [https://github.com/casbin/casbin](https://github.com/casbin/casbin)
-- PHP Casbin Database Adapter: [https://github.com/php-casbin/database-adapter](https://github.com/php-casbin/database-adapter)
+- PHP Casbin Database Adapter: [https://github.com/php-casbin/database-adapter](https://github.com/php-casbin/database-adapter) — desde v1.1.0 el paquete ya no lo usa internamente (la persistencia va por `LaravelDatabaseAdapter`), pero se mantiene como dependencia por compatibilidad con copias de `casbin/` ya publicadas en apps que referencien `CasbinAdapter\Database\Adapter`.
 
 Cada dependencia mantiene su propia licencia. Revisa sus repositorios y archivos de licencia para más detalle.
