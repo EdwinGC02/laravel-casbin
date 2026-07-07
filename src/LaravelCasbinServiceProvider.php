@@ -19,7 +19,10 @@ class LaravelCasbinServiceProvider extends ServiceProvider
             return EnforcerFactory::make();
         });
 
-        $this->app->bind(
+        // Singleton: el servicio es sin estado (el resultado de cada chequeo
+        // ya se cachea) y así todas las inyecciones comparten el mismo
+        // enforcer perezoso en lugar de crear una instancia por resolución.
+        $this->app->singleton(
             PermissionServiceInterface::class,
             PermissionService::class
         );
