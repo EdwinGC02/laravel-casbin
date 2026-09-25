@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Config;
 use Sodeker\LaravelCasbin\Domain\Contracts\PermissionServiceInterface;
+use Sodeker\LaravelCasbin\Domain\Contracts\TenantContextInterface;
 use Symfony\Component\HttpFoundation\Response;
 
 class CheckPermission
@@ -22,7 +23,12 @@ class CheckPermission
         }
 
         $user = Auth::user();
-        $tenantId = session('tenant_id');
+
+        // El tenant lo resuelve la app (TenantContextInterface). Antes se leía
+        // `session('tenant_id')` fijo aquí, lo que autoriza contra el tenant de
+        // la última pestaña que escribió la sesión, no contra el de esta
+        // petición.
+        $tenantId = app(TenantContextInterface::class)->currentTenantId();
 
         if (!$user || !$tenantId) {
             abort(401);

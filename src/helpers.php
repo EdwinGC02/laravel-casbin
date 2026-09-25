@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Config;
 use Sodeker\LaravelCasbin\Domain\Contracts\PermissionServiceInterface;
+use Sodeker\LaravelCasbin\Domain\Contracts\TenantContextInterface;
 
 if (!function_exists('can')) {
     function can(string $resource, string $action): bool
@@ -11,7 +12,8 @@ if (!function_exists('can')) {
         }
 
         $user = auth()->user();
-        $tenantId = session('tenant_id');
+        // El tenant lo resuelve la app, no la sesión (ver TenantContextInterface).
+        $tenantId = app(TenantContextInterface::class)->currentTenantId();
 
         if (!$user || !$tenantId) {
             return false;
