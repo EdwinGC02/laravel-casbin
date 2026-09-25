@@ -20,12 +20,12 @@ Si ambos se aplican correctamente, el resultado debe ser el mismo.
 
 1. El paquete esta instalado y cargado.
 2. `config/casbin.php` esta configurado (especialmente `enabled`, `connection`, `tenant_prefix`).
-3. Existe contexto de tenant en sesion (si el proyecto es multi-tenant).
+3. El tenant activo se resuelve (si el proyecto es multi-tenant). Por defecto el paquete lo lee de la sesión; si tu app lo resuelve por petición, reemplaza `TenantContextInterface` — ver README, «Resolver el tenant de la petición».
 4. El middleware de tenant (si aplica) corre antes de tus rutas de modulo.
 5. Las tablas de seguridad existen y estan pobladas:
    - `modules_tenant_apps`
    - `permissions`
-   - `role_permissions`
+   - `role_permissions` — **con columna de tenant**: los permisos de un rol son por tenant
    - `casbin_rule`
 6. El proyecto no depende de interfaces/clases locales ajenas al paquete para autorizar (`App\Contracts\...`, `App\Casbin\...`) salvo que sea una extension intencional.
 
@@ -64,15 +64,23 @@ Ejemplo de acciones:
 - `edit`
 - `delete`
 
-### Paso 4. Asignar permisos a roles
+### Paso 4. Asignar permisos a roles, por tenant
 
-Inserta/actualiza `role_permissions` para definir que rol puede ejecutar cada accion del modulo.
+Inserta/actualiza `role_permissions` para definir que rol puede ejecutar cada accion del modulo **en cada tenant**.
+
+La llave es el trío (tenant, rol, permiso), no el par (rol, permiso). `roles` suele ser una tabla global —el mismo rol asociado a varias empresas— y cada empresa contrata apps distintas: si la fuente de verdad no lleva tenant, guardar el rol desde una empresa reescribe lo que ese rol tenía configurado en las demás.
 
 ### Paso 5. Sincronizar politicas Casbin
 
 Regenera o sincroniza `casbin_rule`:
 - Politicas `p` por rol/dominio/modulo/accion.
 - Grouping `g` por usuario/rol/dominio.
+
+**Hazlo con `TenantRolePolicyWriterInterface`, no con SQL propio.** Cada operación del contrato exige el tenant, así que no hay forma de borrar o escribir políticas de un rol en dominios que no pedías:
+
+```php
+$this->policies->replaceRolePolicies($roleCode, $tenantId, $paresModuloAccion);
+```
 
 Si usas seeders de sincronizacion, ejecútalos despues de cambiar roles/permisos.
 
@@ -135,7 +143,7 @@ Prueba minima:
 
 - `modules_tenant_apps`: catalogo de modulos por app.
 - `permissions`: acciones por modulo.
-- `role_permissions`: matriz rol-permiso.
+- `role_permissions`: matriz tenant-rol-permiso.
 - `tenant_users`: usuarios asociados a tenant (si aplica).
 - `tenant_apps`: apps habilitadas por tenant (si aplica).
 - `casbin_rule`: politicas (`p`) y agrupaciones (`g`).
@@ -162,14 +170,18 @@ Prueba minima:
 5. **Dependencias que no existen**
    - El modulo sigue usando contratos/clases locales antiguas en lugar del paquete.
 
+6. **Un tenant pierde permisos cuando se edita el rol desde otro**
+   - `role_permissions` sin columna de tenant: la fuente de verdad es global.
+   - O una escritura a `casbin_rule` que no filtra por `v1` (el dominio), o que recorre los tenants activos replicando la misma politica. Usa el writer del paquete.
+
 ---
 
 ## 6) Flujo rapido: “instale el paquete, que ejecuto ahora”
 
 1. Crear modulo en `modules_tenant_apps`.
 2. Crear acciones en `permissions`.
-3. Asignar acciones a roles en `role_permissions`.
-4. Sincronizar `casbin_rule`.
+3. Asignar acciones a roles en `role_permissions`, por tenant.
+4. Sincronizar `casbin_rule` con `TenantRolePolicyWriterInterface`.
 5. Proteger rutas con `casbin:<module>,<action>`.
 6. Exponer permisos UI con `PermissionServiceInterface->can(...)`.
 7. Probar con usuarios/roles/tenants reales.

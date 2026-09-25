@@ -28,17 +28,55 @@ class PermissionService implements PermissionServiceInterface
             return true;
         }
 
-        $key = "perm:$userId:$tenantId:$resource:$action";
         $tenantPrefix = Config::get('casbin.tenant_prefix', 'tenant:');
 
-        return Cache::remember($key, 300, function () use ($userId, $tenantId, $resource, $action, $tenantPrefix) {
+        $check = function () use ($userId, $tenantId, $resource, $action, $tenantPrefix) {
             return $this->enforcer()->enforce(
                 "user:$userId",
                 $tenantPrefix . $tenantId,
                 $resource,
                 $action
             );
-        });
+        };
+
+        $ttl = $this->cacheTtl();
+
+        if ($ttl <= 0) {
+            return $check();
+        }
+
+        return Cache::remember(
+            $this->cacheKey($userId, $tenantId, $resource, $action),
+            $ttl,
+            $check
+        );
+    }
+
+    /**
+     * Llave de caché del chequeo.
+     *
+     * Aislada en un método para que la app pueda añadirle su propio sello de
+     * versión sin reescribir `can()`. Hace falta porque el resultado se cachea
+     * entre peticiones: sin sello, un cambio de permisos tarda hasta el TTL en
+     * notarse. El patrón es extender esta clase y devolver la llave con la
+     * versión de permisos del tenant, de modo que cada cambio deje huérfanas
+     * las entradas anteriores (expiran solas) y el permiso nuevo se vea en el
+     * siguiente chequeo.
+     */
+    protected function cacheKey(int|string $userId, int|string $tenantId, string $resource, string $action): string
+    {
+        return "perm:$userId:$tenantId:$resource:$action";
+    }
+
+    /**
+     * Segundos que vive cada resultado en caché (`casbin.cache_ttl`).
+     *
+     * Amortigua las ráfagas: armar un menú hace decenas de chequeos en una
+     * misma petición. Con 0 el caché queda deshabilitado.
+     */
+    protected function cacheTtl(): int
+    {
+        return (int) Config::get('casbin.cache_ttl', 300);
     }
 
     protected function enforcer(): Enforcer

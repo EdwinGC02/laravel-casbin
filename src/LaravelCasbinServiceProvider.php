@@ -6,8 +6,12 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\File;
 use Casbin\Enforcer;
 use Sodeker\LaravelCasbin\Application\Services\PermissionService;
+use Sodeker\LaravelCasbin\Application\Services\TenantRolePolicyWriter;
 use Sodeker\LaravelCasbin\Domain\Contracts\PermissionServiceInterface;
+use Sodeker\LaravelCasbin\Domain\Contracts\TenantContextInterface;
+use Sodeker\LaravelCasbin\Domain\Contracts\TenantRolePolicyWriterInterface;
 use Sodeker\LaravelCasbin\Infrastructure\Casbin\EnforcerFactory;
+use Sodeker\LaravelCasbin\Infrastructure\Tenancy\SessionTenantContext;
 
 class LaravelCasbinServiceProvider extends ServiceProvider
 {
@@ -25,6 +29,23 @@ class LaravelCasbinServiceProvider extends ServiceProvider
         $this->app->singleton(
             PermissionServiceInterface::class,
             PermissionService::class
+        );
+
+        // Tenant de la petición. Por defecto la sesión, que es lo que el
+        // paquete leía de forma fija. Las apps que resuelven el tenant por
+        // petición (p. ej. en la URL, con varias pestañas en tenants
+        // distintos) DEBEN reemplazar este binding: la sesión es una sola por
+        // navegador y autorizaría contra el tenant de la última pestaña.
+        $this->app->bind(
+            TenantContextInterface::class,
+            SessionTenantContext::class
+        );
+
+        // Escritura de políticas acotada al dominio. Sin estado, por eso
+        // singleton.
+        $this->app->singleton(
+            TenantRolePolicyWriterInterface::class,
+            TenantRolePolicyWriter::class
         );
     }
 
