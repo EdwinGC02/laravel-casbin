@@ -2,171 +2,147 @@
 
 namespace App\Casbin\Services;
 
-use App\Casbin\Authorization\CasbinEnforcerFactory;
 use Illuminate\Support\Facades\DB;
+use Sodeker\LaravelCasbin\Domain\Contracts\TenantRolePolicyWriterInterface;
 
+/**
+ * Sincroniza la tabla relacional de permisos (`role_permissions`) hacia las
+ * políticas de Casbin (`casbin_rule`).
+ *
+ * Todo aquí es POR TENANT, sin excepción. `role_permissions` lleva `tenant_id`
+ * justamente para eso: `roles` es una tabla global, el mismo rol puede estar
+ * asociado a varios tenants, y cada tenant debe poder darle permisos distintos.
+ * Si la fuente de verdad no tuviera tenant, reconstruir un dominio a partir de
+ * ella replicaría en todos los tenants lo último que se guardó en uno, y editar
+ * un rol desde un tenant borraría en silencio los permisos que ese mismo rol
+ * tenía configurados en otro.
+ *
+ * Las escrituras van por TenantRolePolicyWriterInterface, que exige el tenant
+ * en cada operación.
+ */
 class CasbinSyncService
 {
-    /**
-     * Sincroniza políticas (p) para un tenant.
-     */
-    public function sync(): void
-    {
-        $tenantId = (int) session('tenant_id', 1);
-        $this->syncPoliciesByDomain($tenantId);
-    }
+    public function __construct(
+        private readonly TenantRolePolicyWriterInterface $policyWriter,
+    ) {}
 
+    /**
+     * Reconstruye las políticas de TODOS los roles del tenant indicado.
+     */
     public function syncPoliciesByDomain(int|string $tenantId): void
     {
-        $domain = config('casbin.tenant_prefix', 'tenant:') . $tenantId;
-        $conn = DB::connection(config('casbin.connection', 'landlord'));
-        $conn->table('casbin_rule')
-            ->where('ptype', 'p')
-            ->where('v1', $domain)
-            ->delete();
-
-        $enforcer = CasbinEnforcerFactory::make();
-        $permissions = $conn->table('role_permissions as rp')
+        $roleCodes = $this->connection()
+            ->table('role_permissions as rp')
             ->join('roles as r', 'r.id', '=', 'rp.role_id')
-            ->join('permissions as p', 'p.id', '=', 'rp.permission_id')
-            ->join('modules_permissions as mp', 'mp.id', '=', 'p.module_id')
+            ->where('rp.tenant_id', $tenantId)
             ->where('rp.status', 1)
-            ->select([
-                'r.code as role_code',
-                'mp.code as module_code',
-                'p.action as action',
-            ])
-            ->get();
+            ->distinct()
+            ->pluck('r.code');
 
-        foreach ($permissions as $perm) {
-            $enforcer->addPermissionForUser(
-                $perm->role_code,
-                $domain,
-                $perm->module_code,
-                $perm->action
+        foreach ($roleCodes as $roleCode) {
+            $this->policyWriter->replaceRolePolicies(
+                (string) $roleCode,
+                $tenantId,
+                $this->policiesFor((string) $roleCode, $tenantId),
             );
         }
     }
 
     /**
-     * Sincroniza políticas (p) de un rol para un tenant.
+     * Reconstruye las políticas de un rol en un tenant.
      */
     public function syncPoliciesForRole(int $roleId, int|string $tenantId): void
     {
-        $domain = config('casbin.tenant_prefix', 'tenant:') . $tenantId;
-        $conn = DB::connection(config('casbin.connection', 'landlord'));
-        $role = $conn->table('roles')->where('id', $roleId)->first();
-        if (! $role) {
-            return;
-        }
+        $roleCode = $this->connection()->table('roles')->where('id', $roleId)->value('code');
 
-        $enforcer = CasbinEnforcerFactory::make();
-        $existing = $conn->table('casbin_rule')
-            ->where('ptype', 'p')
-            ->where('v0', $role->code)
-            ->where('v1', $domain)
-            ->get(['v2', 'v3']);
-
-        foreach ($existing as $row) {
-            $enforcer->deletePermissionForUser($role->code, $domain, $row->v2, $row->v3);
-        }
-
-        $permissions = $conn->table('role_permissions as rp')
-            ->join('permissions as p', 'p.id', '=', 'rp.permission_id')
-            ->join('modules_permissions as mp', 'mp.id', '=', 'p.module_id')
-            ->where('rp.role_id', $roleId)
-            ->where('rp.status', 1)
-            ->select('mp.code as module_code', 'p.action as action')
-            ->get();
-
-        foreach ($permissions as $perm) {
-            $enforcer->addPermissionForUser($role->code, $domain, $perm->module_code, $perm->action);
-        }
-    }
-
-    public function removePoliciesForRole(string $roleCode, int|string $tenantId): void
-    {
-        $domain = config('casbin.tenant_prefix', 'tenant:') . $tenantId;
-        $enforcer = CasbinEnforcerFactory::make();
-        $conn = DB::connection(config('casbin.connection', 'landlord'));
-        $rows = $conn->table('casbin_rule')
-            ->where('ptype', 'p')
-            ->where('v0', $roleCode)
-            ->where('v1', $domain)
-            ->get(['v2', 'v3']);
-
-        foreach ($rows as $row) {
-            $enforcer->deletePermissionForUser($roleCode, $domain, $row->v2, $row->v3);
-        }
-    }
-
-    public function syncUserRole(string $userUuid, ?int $roleId): void
-    {
-        $tenantId = (int) session('tenant_id', 1);
-        if ($roleId === null) {
-            $this->clearRolesForUser($userUuid, $tenantId);
-            return;
-        }
-
-        $this->assignRoleToUser($userUuid, $roleId, $tenantId);
-    }
-
-    public function assignRoleToUser(string $userUuid, int $roleId, int|string $tenantId): void
-    {
-        $conn = DB::connection(config('casbin.connection', 'landlord'));
-        $userId = $conn->table('users')->where('uuid', $userUuid)->value('id');
-        if ($userId === null) {
-            return;
-        }
-        $roleCode = $conn->table('roles')->where('id', $roleId)->value('code');
         if ($roleCode === null) {
             return;
         }
 
-        $this->clearRolesForUserByDomain($userId, $tenantId);
-        $this->assignRoleToUserByDomain($userId, $roleCode, $tenantId);
+        $this->policyWriter->replaceRolePolicies(
+            (string) $roleCode,
+            $tenantId,
+            $this->policiesFor((string) $roleCode, $tenantId),
+        );
     }
 
-    public function assignRoleToUserByDomain(int|string $userId, string $roleCode, int|string $tenantId): void
+    /**
+     * Quita las políticas del rol en ese tenant. Las de los demás quedan.
+     */
+    public function removePoliciesForRole(string $roleCode, int|string $tenantId): void
     {
-        $domain = config('casbin.tenant_prefix', 'tenant:') . $tenantId;
-        CasbinEnforcerFactory::make()->addRoleForUser('user:' . $userId, $roleCode, $domain);
+        $this->policyWriter->removeRolePolicies($roleCode, $tenantId);
     }
 
-    public function clearRolesForUserByDomain(int|string $userId, int|string $tenantId): void
+    /**
+     * El rol se eliminó: se va de todos los tenants.
+     */
+    public function forgetRole(string $roleCode): void
     {
-        $domain = config('casbin.tenant_prefix', 'tenant:') . $tenantId;
-        $enforcer = CasbinEnforcerFactory::make();
-        $sub = 'user:' . $userId;
-
-        foreach ($enforcer->getRolesForUserInDomain($sub, $domain) as $role) {
-            $enforcer->deleteRoleForUser($sub, $role, $domain);
-        }
+        $this->policyWriter->forgetRole($roleCode);
     }
 
-    public function clearRolesForUser(string $userUuid, int|string $tenantId): void
+    public function assignRoleToUser(string $userUuid, int $roleId, int|string $tenantId): void
     {
-        $conn = DB::connection(config('casbin.connection', 'landlord'));
-        $userId = $conn->table('users')->where('uuid', $userUuid)->value('id');
+        $userId = $this->connection()->table('users')->where('uuid', $userUuid)->value('id');
         if ($userId === null) {
             return;
         }
 
-        $this->clearRolesForUserByDomain($userId, $tenantId);
+        $roleCode = $this->connection()->table('roles')->where('id', $roleId)->value('code');
+        if ($roleCode === null) {
+            return;
+        }
+
+        $this->assignRoleToUserByDomain($userId, (string) $roleCode, $tenantId);
     }
 
-    public function syncUserRoles(): void
+    public function assignRoleToUserByDomain(int|string $userId, string $roleCode, int|string $tenantId): void
     {
-        $tenantId = (int) session('tenant_id', 1);
-        $conn = DB::connection(config('casbin.connection', 'landlord'));
-        $users = $conn->table('users')
-            ->join('roles', 'users.role_id', '=', 'roles.id')
-            ->select('users.id as user_id', 'roles.code as role_code')
-            ->get();
+        $this->policyWriter->revokeUserRoles($userId, $tenantId);
+        $this->policyWriter->grantRoleToUser($userId, $roleCode, $tenantId);
+    }
 
-        foreach ($users as $user) {
-            $this->clearRolesForUserByDomain($user->user_id, $tenantId);
-            $this->assignRoleToUserByDomain($user->user_id, $user->role_code, $tenantId);
+    public function clearRolesForUserByDomain(int|string $userId, int|string $tenantId): void
+    {
+        $this->policyWriter->revokeUserRoles($userId, $tenantId);
+    }
+
+    public function clearRolesForUser(string $userUuid, int|string $tenantId): void
+    {
+        $userId = $this->connection()->table('users')->where('uuid', $userUuid)->value('id');
+        if ($userId === null) {
+            return;
         }
+
+        $this->policyWriter->revokeUserRoles($userId, $tenantId);
+    }
+
+    /**
+     * Pares objeto/acción del rol en ese tenant, leídos de la tabla relacional.
+     *
+     * @return array<int, array{object: string, action: string}>
+     */
+    private function policiesFor(string $roleCode, int|string $tenantId): array
+    {
+        return $this->connection()
+            ->table('role_permissions as rp')
+            ->join('roles as r', 'r.id', '=', 'rp.role_id')
+            ->join('permissions as p', 'p.id', '=', 'rp.permission_id')
+            ->join('modules_permissions as mp', 'mp.id', '=', 'p.module_id')
+            ->where('r.code', $roleCode)
+            ->where('rp.tenant_id', $tenantId)
+            ->where('rp.status', 1)
+            ->get(['mp.code as module_code', 'p.action as action'])
+            ->map(static fn ($row): array => [
+                'object' => (string) $row->module_code,
+                'action' => (string) $row->action,
+            ])
+            ->all();
+    }
+
+    private function connection()
+    {
+        return DB::connection(config('casbin.connection', 'landlord'));
     }
 }
